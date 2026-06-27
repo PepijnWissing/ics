@@ -17,6 +17,7 @@ jobs:
       ICAL2: ${{ secrets.ICAL2 }}
       ICAL3: ${{ secrets.ICAL3 }}
       ICAL4: ${{ secrets.ICAL4 }}
+      ICAL5: ${{ secrets.ICAL5 }}
 
     steps:
       - uses: actions/checkout@v4
