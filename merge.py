@@ -12,6 +12,7 @@ URLS = [
     os.getenv("ICAL4"),
 ]
 
+URLS = [u.replace("webcal://", "https://", 1) if u else u for u in URLS]
 URLS = [u for u in URLS if u]
 
 if not URLS:
