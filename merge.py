@@ -1,6 +1,7 @@
 import hashlib
 import os
 import sys
+from datetime import datetime, timedelta, timezone
 
 import requests
 from icalendar import Calendar, vText
@@ -21,6 +22,37 @@ for _i, _cfg in enumerate(CALENDAR_CONFIG, 1):
 if not CALENDARS:
     print("No calendars found. Set ICAL1..ICAL5 environment variables.")
     sys.exit(1)
+
+LOG_FILE = "run.log"
+TWO_WEEKS = timedelta(weeks=2)
+_run_time = datetime.now(timezone.utc)
+
+
+def write_log(message: str) -> None:
+    timestamp = _run_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+    new_line = f"{timestamp} | {message}"
+
+    existing = []
+    if os.path.exists(LOG_FILE):
+        with open(LOG_FILE) as f:
+            for raw in f:
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    line_ts = datetime.strptime(raw[:20], "%Y-%m-%dT%H:%M:%SZ").replace(
+                        tzinfo=timezone.utc
+                    )
+                    if _run_time - line_ts <= TWO_WEEKS:
+                        existing.append(raw)
+                except ValueError:
+                    existing.append(raw)
+
+    with open(LOG_FILE, "w") as f:
+        for line in existing:
+            f.write(line + "\n")
+        f.write(new_line + "\n")
+
 
 merged = Calendar()
 merged.add("prodid", vText("-//Frameo Calendar//"))
@@ -64,6 +96,7 @@ for cal_config in CALENDARS:
             events.append((uid, recurrence_id_str, component, cal_config))
 
 if len(failed) == len(CALENDARS):
+    write_log(f"ERROR — all {len(CALENDARS)} feeds unreachable, combined.ics unchanged")
     print("All calendar feeds failed. Keeping existing combined.ics.", file=sys.stderr)
     sys.exit(1)
 
@@ -102,9 +135,14 @@ if os.path.exists(outfile):
     with open(outfile, "rb") as f:
         old_hash = hashlib.sha256(f.read()).hexdigest()
 
+successful = len(CALENDARS) - len(failed)
+warn = f"{len(failed)} feed(s) unreachable — " if failed else ""
+
 if new_hash != old_hash:
     with open(outfile, "wb") as f:
         f.write(output)
+    write_log(f"{warn}combined.ics updated — {len(seen)} events from {successful} calendar(s)")
     print(f"Calendar updated ({len(seen)} events).")
 else:
+    write_log(f"{warn}no changes — {len(seen)} events from {successful} calendar(s)")
     print("No changes.")

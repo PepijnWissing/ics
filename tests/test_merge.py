@@ -4,6 +4,7 @@ import os
 import sys
 import textwrap
 import types
+from datetime import datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -354,3 +355,69 @@ class TestErrorHandling:
             assert exc_info.value.code == 1
         finally:
             sys.modules.pop("config", None)
+
+
+# ---------------------------------------------------------------------------
+# Tests – logging
+# ---------------------------------------------------------------------------
+
+class TestLogging:
+    def test_log_file_is_created(self, monkeypatch, tmp_docs):
+        feeds = {"https://cal1.example": make_ics("Event")}
+        run_merge(feeds, monkeypatch, tmp_docs)
+        assert (tmp_docs / "run.log").exists()
+
+    def test_log_line_has_timestamp_and_message(self, monkeypatch, tmp_docs):
+        feeds = {"https://cal1.example": make_ics("Event")}
+        run_merge(feeds, monkeypatch, tmp_docs)
+        lines = (tmp_docs / "run.log").read_text().strip().splitlines()
+        assert len(lines) == 1
+        # Timestamp format: 2026-06-27T12:00:00Z
+        assert lines[0][10] == "T" and lines[0][19] == "Z"
+        assert " | " in lines[0]
+
+    def test_each_run_appends_a_line(self, monkeypatch, tmp_docs):
+        feeds = {"https://cal1.example": make_ics("Event")}
+        run_merge(feeds, monkeypatch, tmp_docs)
+        run_merge(feeds, monkeypatch, tmp_docs)
+        lines = (tmp_docs / "run.log").read_text().strip().splitlines()
+        assert len(lines) == 2
+
+    def test_old_entries_are_pruned(self, monkeypatch, tmp_docs):
+        from datetime import timedelta, timezone
+        old_ts = (datetime.now(timezone.utc) - timedelta(days=15)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        log = tmp_docs / "run.log"
+        log.write_text(f"{old_ts} | old entry that should be removed\n")
+
+        feeds = {"https://cal1.example": make_ics("Event")}
+        run_merge(feeds, monkeypatch, tmp_docs)
+
+        lines = (tmp_docs / "run.log").read_text().strip().splitlines()
+        assert all("old entry" not in line for line in lines)
+        assert len(lines) == 1  # only the new entry
+
+    def test_all_feeds_failing_still_writes_log(self, monkeypatch, tmp_docs):
+        import requests as req_mod
+
+        original_session = req_mod.Session
+
+        class FailSession:
+            def get(self, url, timeout=30):
+                raise ConnectionError("down")
+
+        req_mod.Session = FailSession  # type: ignore[attr-defined]
+        monkeypatch.setenv("ICAL1", "https://fail.example")
+        mock_config = types.ModuleType("config")
+        mock_config.CALENDARS = [_DEFAULT_CAL_CONFIG]  # type: ignore[attr-defined]
+        sys.modules["config"] = mock_config
+
+        try:
+            with pytest.raises(SystemExit):
+                exec(compile(_merge_source(), "merge.py", "exec"), {"__name__": "__main__"})
+        finally:
+            req_mod.Session = original_session  # type: ignore[attr-defined]
+            sys.modules.pop("config", None)
+
+        lines = (tmp_docs / "run.log").read_text().strip().splitlines()
+        assert len(lines) == 1
+        assert "ERROR" in lines[0]
