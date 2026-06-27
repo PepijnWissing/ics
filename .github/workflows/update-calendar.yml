@@ -1,0 +1,44 @@
+name: Update calendar
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+
+    env:
+      ICAL1: ${{ secrets.ICAL1 }}
+      ICAL2: ${{ secrets.ICAL2 }}
+      ICAL3: ${{ secrets.ICAL3 }}
+      ICAL4: ${{ secrets.ICAL4 }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Merge calendars
+        run: python merge.py
+
+      - name: Commit changes
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add docs/combined.ics
+          if git diff --cached --quiet; then
+            echo "Nothing changed."
+          else
+            git commit -m "Automatic calendar update"
+            git push
+          fi
